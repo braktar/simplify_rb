@@ -2,81 +2,98 @@
 
 module SimplifyRb
   class DouglasPeuckerSimplifier
+    INITIAL_STACK_SIZE = 1024
+
+    def initialize
+      @stack = Array.new(INITIAL_STACK_SIZE) { [0, 0] }
+      @stack_size = 0
+    end
+
     def process(points, sq_tolerance)
-      points.first.keep = true
-      points.last.keep  = true
+      return points if points.length <= 2
+
+      @markers = Array.new(points.length, false)
+      @markers[0] = true
+      @markers[-1] = true
 
       simplify_douglas_peucker(points, sq_tolerance)
-        .select(&:keep)
+
+      result = []
+      points.each_with_index do |point, i|
+        result << point if @markers[i]
+      end
+      result
     end
 
     private
 
-    MaxSqDist = Struct.new(:max_sq_dist, :index)
-
     def simplify_douglas_peucker(points, sq_tolerance)
-      first_i = 0
-      last_i  = points.length - 1
-      index = nil
-      stack = []
+      @stack_size = 1
+      @stack[0] = [0, points.length - 1]
 
-      while last_i
-        result = calc_max_sq_dist(first_i, last_i, points)
-        index = result.index
+      max_sq_dist = 0.0
+      temp_dist = 0.0
 
-        if result.max_sq_dist > sq_tolerance
-          points[index].keep = true
+      while @stack_size > 0
+        @stack_size -= 1
+        first_i, last_i = @stack[@stack_size]
+        max_sq_dist = 0.0
+        index = nil
 
-          stack.push(first_i, index, index, last_i)
+        p1 = points[first_i]
+        p2 = points[last_i]
+
+        dx = p2.x - p1.x
+        dy = p2.y - p1.y
+        sq_length = dx * dx + dy * dy
+
+        i = first_i + 1
+        while i < last_i
+          temp_dist = sq_dist_point_to_segment(points[i], p1, p2, dx, dy, sq_length)
+          if temp_dist > max_sq_dist
+            index = i
+            max_sq_dist = temp_dist
+          end
+          i += 1
         end
 
-        first_i, last_i = stack.pop(2)
+        if max_sq_dist > sq_tolerance
+          @markers[index] = true
+
+          ensure_stack_capacity(2)
+          @stack[@stack_size] = [first_i, index]
+          @stack_size += 1
+          @stack[@stack_size] = [index, last_i]
+          @stack_size += 1
+        end
       end
 
       points
     end
 
-    def calc_max_sq_dist(first_i, last_i, points)
-      index = nil
-      max_sq_dist = 0
-      range = (first_i + 1)...last_i
-
-      range.each do |i|
-        sq_dist = get_sq_seg_dist(points[i], points[first_i], points[last_i])
-
-        if sq_dist > max_sq_dist
-          index = i
-          max_sq_dist = sq_dist
-        end
+    def ensure_stack_capacity(additional_size)
+      if @stack_size + additional_size > @stack.length
+        new_size = [@stack.length * 2, @stack_size + additional_size].max
+        @stack.concat(Array.new(new_size - @stack.length) { [0, 0] })
       end
-
-      MaxSqDist.new(max_sq_dist, index)
     end
 
-    # Square distance from a point to a segment
-    def get_sq_seg_dist(point, point_1, point_2)
-      x  = point_1.x
-      y  = point_1.y
-      dx = point_2.x - x
-      dy = point_2.y - y
-
-      if dx != 0 || dy != 0
-        t = ((point.x - x) * dx + (point.y - y) * dy) / (dx * dx + dy * dy)
-
-        if t > 1
-          x = point_2.x
-          y = point_2.y
-
-        elsif t > 0
-          x += dx * t
-          y += dy * t
-        end
+    def sq_dist_point_to_segment(point, p1, p2, dx, dy, sq_length)
+      if sq_length.zero?
+        pdx = point.x - p1.x
+        pdy = point.y - p1.y
+        return pdx * pdx + pdy * pdy
       end
 
-      dx = point.x - x
-      dy = point.y - y
+      t = ((point.x - p1.x) * dx + (point.y - p1.y) * dy) / sq_length
+      t = t > 1 ? 1 : (t < 0 ? 0 : t)
 
-      dx * dx + dy * dy
+      px = p1.x + (t * dx)
+      py = p1.y + (t * dy)
+
+      pdx = point.x - px
+      pdy = point.y - py
+      pdx * pdx + pdy * pdy
     end
   end
 end
